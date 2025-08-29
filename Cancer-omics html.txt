@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cancer Omics Landscape</title>
+    <!-- The D3.js library is now correctly loaded here -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0c0a09; /* Stone-950 */
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        .node-circle {
+            transition: stroke 0.3s, stroke-width 0.3s;
+            cursor: pointer;
+        }
+        .node-circle:hover {
+            stroke: white;
+            stroke-width: 3px;
+        }
+        .node-label {
+            font-size: 1.2rem;
+            font-weight: bold;
+            pointer-events: none; /* Ignore mouse events on text */
+            text-anchor: middle;
+            fill: #fff;
+            user-select: none;
+            text-shadow: 0 0 5px rgba(0,0,0,0.5);
+            transition: font-size 0.3s;
+        }
+        .sub-node-label {
+            font-size: 0.9rem;
+            fill: #cbd5e1; /* Slate-300 */
+            text-anchor: middle;
+            pointer-events: none;
+            user-select: none;
+            text-shadow: 0 0 5px rgba(0,0,0,0.5);
+        }
+        .link {
+            stroke: #475569; /* Slate-600 */
+            stroke-width: 2px;
+            opacity: 0.6;
+        }
+        .title {
+            position: absolute;
+            top: 2rem;
+            font-size: 2.5rem;
+            font-weight: bold;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="title">Cancer Omics Landscape</div>
+    <svg id="infographic"></svg>
+
+    <script>
+        // Use a DOMContentLoaded listener for more reliable script execution
+        document.addEventListener("DOMContentLoaded", function() {
+            const svg = d3.select("#infographic"),
+                width = window.innerWidth,
+                height = window.innerHeight;
+
+            svg.attr("width", width).attr("height", height);
+
+            const colors = {
+                'Genomics': '#3b82f6',     // Blue-500
+                'Transcriptomics': '#22c55e', // Green-500
+                'Proteomics': '#f97316',    // Orange-500
+                'Metabolomics': '#a855f7', // Purple-500
+                'Cancer': '#ef4444'       // Red-500
+            };
+
+            const initialNodes = [
+                { id: "Cancer", group: 0, radius: 50 },
+                { id: "Genomics", group: 1, parent: "Cancer", radius: 40 },
+                { id: "Transcriptomics", group: 2, parent: "Cancer", radius: 40 },
+                { id: "Proteomics", group: 3, parent: "Cancer", radius: 40 },
+                { id: "Metabolomics", group: 4, parent: "Cancer", radius: 40 }
+            ];
+
+            const subNodesData = {
+                "Genomics": ["Mutations", "Copy Number Variations", "Germline Variants", "Epigenetic Changes"],
+                "Transcriptomics": ["mRNA Expression", "Non-coding RNAs", "Fusion Transcripts", "Alternative Splicing"],
+                "Proteomics": ["Protein Expression", "Post-Translational Modifications", "Signaling Pathways", "Protein-Protein Interactions"],
+                "Metabolomics": ["Metabolic Flux", "Oncometabolites", "Lipidomics", "Energy Pathways"]
+            };
+
+            let nodes = [];
+            let links = [];
+            let expandedNodes = new Set();
+            let isAnimating = false; // Flag to prevent multiple clicks during transition
+            
+            const simulation = d3.forceSimulation()
+                .force("link", d3.forceLink().id(d => d.id).distance(200))
+                .force("charge", d3.forceManyBody().strength(-150))
+                .force("center", d3.forceCenter(width / 2, height / 2));
+
+            let linkElements = svg.append("g").selectAll("line");
+            let nodeElements = svg.append("g").selectAll("circle");
+            let labelElements = svg.append("g").selectAll("text");
+
+            // A helper function to get a consistent key for links, regardless of their state
+            function linkKey(d) {
+                const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+                const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+                return sourceId + "-" + targetId;
+            }
+
+            function update() {
+                // Generate the data based on the current state of expanded nodes
+                nodes = [...initialNodes];
+                expandedNodes.forEach(parentId => {
+                    const newNodes = subNodesData[parentId].map(subId => ({
+                        id: subId,
+                        parent: parentId,
+                        radius: 15,
+                    }));
+                    nodes = [...nodes, ...newNodes];
+                });
+
+                links = nodes.filter(d => d.parent).map(d => ({ source: d.id, target: d.parent }));
+
+                // Re-bind the entire data set to the simulation
+                simulation.nodes(nodes);
+                simulation.force("link").links(links);
+                simulation.alpha(1).restart();
+                
+                // Update and re-bind data to links using the consistent key
+                linkElements = linkElements.data(links, linkKey);
+                linkElements.exit().transition().duration(500).attr("stroke-opacity", 0).remove();
+                linkElements = linkElements.enter().append("line")
+                    .attr("class", "link")
+                    .attr("stroke-opacity", 0)
+                    .transition().duration(500)
+                    .attr("stroke-opacity", 0.6)
+                    .merge(linkElements);
+
+                // Update and re-bind data to nodes
+                nodeElements = nodeElements.data(nodes, d => d.id);
+                nodeElements.exit().transition().duration(500).attr("r", 0).remove();
+                nodeElements = nodeElements.enter().append("circle")
+                    .attr("class", "node-circle")
+                    .attr("r", d => d.radius || 15)
+                    .attr("fill", d => colors[d.parent] || colors[d.id] || "#fff")
+                    .attr("stroke", d => d.parent ? colors[d.parent] : "none")
+                    .on("click", clickNode)
+                    .merge(nodeElements);
+
+                // Update and re-bind data to labels
+                labelElements = labelElements.data(nodes, d => d.id);
+                labelElements.exit().transition().duration(500).attr("opacity", 0).remove();
+                labelElements = labelElements.enter().append("text")
+                    .attr("class", d => d.parent ? "sub-node-label" : "node-label")
+                    .text(d => d.id)
+                    .attr("opacity", 0)
+                    .transition().duration(500)
+                    .attr("opacity", 1)
+                    .merge(labelElements);
+            }
+            
+            function clickNode(event, d) {
+                if (isAnimating) return; // Prevent clicks during animation
+
+                if (d.parent === "Cancer") {
+                    isAnimating = true;
+                    setTimeout(() => {
+                        isAnimating = false;
+                    }, 600); // Set a timeout slightly longer than the transition duration
+
+                    const isExpanded = expandedNodes.has(d.id);
+                    if (isExpanded) {
+                        expandedNodes.delete(d.id);
+                    } else {
+                        expandedNodes.add(d.id);
+                    }
+                    update(); // Call update to reflect the changes
+                }
+            }
+
+            simulation.on("tick", () => {
+                linkElements
+                    .attr
